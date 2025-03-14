@@ -80,7 +80,7 @@
 #pragma GCC diagnostic pop
 
 #define TELEMETRY_MAVLINK_INITIAL_PORT_MODE MODE_TX
-#define TELEMETRY_MAVLINK_MAXRATE 50
+#define TELEMETRY_MAVLINK_MAXRATE 500
 #define TELEMETRY_MAVLINK_DELAY ((1000 * 1000) / TELEMETRY_MAVLINK_MAXRATE)
 
 extern uint16_t rssi; // FIXME dependency on mw.c
@@ -93,25 +93,35 @@ static portSharing_e mavlinkPortSharing;
 
 /* MAVLink datastream rates in Hz */
 static const uint8_t mavRates[] = {
-    [MAV_DATA_STREAM_EXTENDED_STATUS] = 2, //2Hz
-    [MAV_DATA_STREAM_RC_CHANNELS] = 5, //5Hz
-    [MAV_DATA_STREAM_POSITION] = 2, //2Hz
-    [MAV_DATA_STREAM_EXTRA1] = 10, //10Hz
-    [MAV_DATA_STREAM_EXTRA2] = 10 //2Hz
+    [MAV_DATA_STREAM_EXTENDED_STATUS] = 1, 
+    [MAV_DATA_STREAM_RC_CHANNELS] = 0,
+    [MAV_DATA_STREAM_POSITION] = 2, 
+    [MAV_DATA_STREAM_EXTRA1] = 0, 
+    [MAV_DATA_STREAM_EXTRA2] = 0,
+    [MAV_DATA_STREAM_EXTRA3] = 10
+
 };
 
 #define MAXSTREAMS ARRAYLEN(mavRates)
 
-static uint8_t mavTicks[MAXSTREAMS];
+static uint16_t mavTicks[MAXSTREAMS];
 static mavlink_message_t mavMsg;
 static uint8_t mavBuffer[MAVLINK_MAX_PACKET_LEN];
 static uint32_t lastMavlinkMessage = 0;
 
-static int mavlinkStreamTrigger(enum MAV_DATA_STREAM streamNum)
+static int mavlinkStreamTrigger(enum MAV_DATA_STREAM streamNum, uint32_t time_delay)
 {
-    uint8_t rate = (uint8_t) mavRates[streamNum];
+    uint16_t rate = (uint16_t) mavRates[streamNum];
     if (rate == 0) {
         return 0;
+    }
+
+    uint16_t ticks_lost = (uint16_t) (time_delay/TELEMETRY_MAVLINK_DELAY-1);
+
+    if (mavTicks[streamNum] - ticks_lost > 0) {
+        mavTicks[streamNum] -= ticks_lost;        
+    } else {
+        mavTicks[streamNum] = 0;
     }
 
     if (mavTicks[streamNum] == 0) {
@@ -120,12 +130,16 @@ static int mavlinkStreamTrigger(enum MAV_DATA_STREAM streamNum)
             rate = TELEMETRY_MAVLINK_MAXRATE;
         }
 
-        mavTicks[streamNum] = (TELEMETRY_MAVLINK_MAXRATE / rate);
+        mavTicks[streamNum] = (TELEMETRY_MAVLINK_MAXRATE / rate)-1;
         return 1;
     }
 
     // count down at TASK_RATE_HZ
+
     mavTicks[streamNum]--;
+    
+    
+
     return 0;
 }
 
@@ -511,30 +525,65 @@ void mavlinkSendHUDAndHeartbeat(void)
     mavlinkSerialWrite(mavBuffer, msgLength);
 }
 
-void processMAVLinkTelemetry(void)
+void mavlinkSendImuRaw(void) {
+    uint16_t msgLength;
+
+    mavlink_msg_raw_imu_pack(0, 200, &mavMsg,
+        // time_usec Timestamp (microseconds since system boot)
+        micros(),
+        // xacc X acceleration (milli-G)
+        (int16_t) acc.accADC[0] * acc.dev.acc_1G_rec * 1000,
+        // yacc Y acceleration (milli-G)
+        (int16_t) acc.accADC[1] * acc.dev.acc_1G_rec * 1000,
+        // zacc Z acceleration (milli-G)
+        (int16_t) acc.accADC[2] * acc.dev.acc_1G_rec * 1000,
+        // roll angle (decigrees)
+        attitude.values.roll,
+        // pitch angle (decigrees)
+        attitude.values.pitch,
+        // yaw angle (decigrees)
+        attitude.values.yaw,
+
+        // xmag X Magnetic field (raw)
+        0,
+        // ymag Y Magnetic field (raw)
+        0,
+        // zmag Z Magnetic field (raw)
+        0);
+        msgLength = mavlink_msg_to_send_buffer(mavBuffer, &mavMsg);
+        mavlinkSerialWrite(mavBuffer, msgLength);
+    
+}
+
+void processMAVLinkTelemetry(uint32_t time_delay)
 {
     // is executed @ TELEMETRY_MAVLINK_MAXRATE rate
-    if (mavlinkStreamTrigger(MAV_DATA_STREAM_EXTENDED_STATUS)) {
+    if (mavlinkStreamTrigger(MAV_DATA_STREAM_EXTENDED_STATUS, time_delay)) {
         mavlinkSendSystemStatus();
     }
 
-    if (mavlinkStreamTrigger(MAV_DATA_STREAM_RC_CHANNELS)) {
+    if (mavlinkStreamTrigger(MAV_DATA_STREAM_RC_CHANNELS, time_delay)) {
         mavlinkSendRCChannelsAndRSSI();
     }
 
 #ifdef USE_GPS
-    if (mavlinkStreamTrigger(MAV_DATA_STREAM_POSITION)) {
+    if (mavlinkStreamTrigger(MAV_DATA_STREAM_POSITION, time_delay)) {
         mavlinkSendPosition();
     }
 #endif
 
-    if (mavlinkStreamTrigger(MAV_DATA_STREAM_EXTRA1)) {
+    if (mavlinkStreamTrigger(MAV_DATA_STREAM_EXTRA1, time_delay)) {
         mavlinkSendAttitude();
     }
 
-    if (mavlinkStreamTrigger(MAV_DATA_STREAM_EXTRA2)) {
+    if (mavlinkStreamTrigger(MAV_DATA_STREAM_EXTRA2, time_delay)) {
         mavlinkSendHUDAndHeartbeat();
     }
+
+    if (mavlinkStreamTrigger(MAV_DATA_STREAM_EXTRA3, time_delay)) {
+        mavlinkSendImuRaw();
+    }
+
 }
 
 void handleMAVLinkTelemetry(void)
@@ -548,8 +597,9 @@ void handleMAVLinkTelemetry(void)
     }
 
     uint32_t now = micros();
-    if ((now - lastMavlinkMessage) >= TELEMETRY_MAVLINK_DELAY) {
-        processMAVLinkTelemetry();
+    uint32_t delay = now - lastMavlinkMessage;
+    if (delay >= TELEMETRY_MAVLINK_DELAY) {
+        processMAVLinkTelemetry(delay);
         lastMavlinkMessage = now;
     }
 }

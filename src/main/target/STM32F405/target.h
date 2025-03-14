@@ -87,3 +87,15 @@
 #define USE_PID_DENOM_OVERCLOCK_LEVEL 2
 
 #define FLASH_PAGE_SIZE ((uint32_t)0x4000) // 16K sectors
+
+
+// my defines
+#define USE_TELEMETRY
+#define USE_MAVLINK_TELEMETRY
+
+#define USE_GPS
+#define USE_MAG
+#define USE_DSHOT
+
+#define USE_BARO_DPS310
+#define USE_MAG_HMC5883
