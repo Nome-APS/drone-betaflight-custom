@@ -95,7 +95,7 @@ static portSharing_e mavlinkPortSharing;
 static const uint8_t mavRates[] = {
     [MAV_DATA_STREAM_EXTENDED_STATUS] = 1, 
     [MAV_DATA_STREAM_RC_CHANNELS] = 0,
-    [MAV_DATA_STREAM_POSITION] = 10, 
+    [MAV_DATA_STREAM_POSITION] = 20, 
     [MAV_DATA_STREAM_EXTRA1] = 0, 
     [MAV_DATA_STREAM_EXTRA2] = 0,
     [MAV_DATA_STREAM_EXTRA3] = 50
