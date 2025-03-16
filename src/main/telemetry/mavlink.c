@@ -68,6 +68,7 @@
 #include "sensors/barometer.h"
 #include "sensors/boardalignment.h"
 #include "sensors/battery.h"
+#include "sensors/compass.h"
 
 #include "telemetry/telemetry.h"
 #include "telemetry/mavlink.h"
@@ -545,11 +546,11 @@ void mavlinkSendImuRaw(void) {
         attitude.values.yaw,
 
         // xmag X Magnetic field (raw)
-        0,
+        (int16_t) mag.magADC[0],
         // ymag Y Magnetic field (raw)
-        0,
+        (int16_t) mag.magADC[1],
         // zmag Z Magnetic field (raw)
-        0);
+        (int16_t) mag.magADC[2]);
         msgLength = mavlink_msg_to_send_buffer(mavBuffer, &mavMsg);
         mavlinkSerialWrite(mavBuffer, msgLength);
     
